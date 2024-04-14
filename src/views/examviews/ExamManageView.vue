@@ -72,7 +72,7 @@
     </a-table>
     <a-drawer :width="600"
               :visible="visible"
-              @ok="handleOk"
+              @ok="handleOk($refs.createFromRef)"
               @cancel="handleCancel($refs.createFromRef)"
               unmountOnClose>
       <template #title>
@@ -90,31 +90,44 @@
           </a-select>
         </a-form-item>
         <a-form-item field="paperId" label="选择试卷:">
-          <a-button @click="doPickPaper" :style="{width: '100px'}" type="primary">
-            <template #icon>
-              <icon-plus />
-            </template>
-          </a-button>
+          <a-space direction="vertical">
+            <a-button @click="doPickPaper" :style="{width: '100px'}" type="primary">
+              <template #icon>
+                <icon-plus />
+              </template>
+            </a-button>
+            <a-tag color="orange" closable :visible="examForm.paperId != 0" @close="() => examForm.paperId = 0">
+              {{ examForm.paperId }}
+            </a-tag>
+          </a-space>
         </a-form-item>
-        <a-form-item field="classid" label="选择班级:">
-          <a-button @click="doPickClass" :style="{width: '100px'}" type="primary">
-            <template #icon>
-              <icon-plus />
-            </template>
-          </a-button>
+        <a-form-item field="classIdList" label="选择班级:">
+          <a-space direction="vertical">
+            <a-button @click="doPickClass" :style="{width: '100px'}" type="primary">
+              <template #icon>
+                <icon-plus />
+              </template>
+            </a-button>
+            <a-space wrap>
+              <a-tag color="orange" closable v-for="(item, index) in examForm.classIdList" :key="item"
+                     @close="() => {examForm.classIdList.splice(index, 1) }">
+                {{ item }}
+              </a-tag>
+            </a-space>
+          </a-space>
         </a-form-item>
         <a-form-item field="examStartTime" label="开始时间:">
-          <a-date-picker v-model="examForm.examStartTime" style="width: 200px;" />
+          <a-date-picker position="left" show-time v-model="examForm.examStartTime" style="width: 200px;" />
         </a-form-item>
         <a-form-item field="examEndTime" label="结束时间:">
-          <a-date-picker v-model="examForm.examEndTime" style="width: 200px;" />
+          <a-date-picker position="left" show-time v-model="examForm.examEndTime" style="width: 200px;" />
         </a-form-item>
         <a-form-item field="examDurationTime" label="考试时长:">
           <a-time-picker v-model="examForm.examDurationTime" placeholder="请选择考试时长" style="width: 200px;" />
         </a-form-item>
       </a-form>
     </a-drawer>
-    <a-modal width="800px" v-model:visible="pickPaper" @ok="pickPaperOk" @cancel="pickPaperCancel">
+    <a-modal width="800px" v-model:visible="pickPaper" @ok="doPickPaperModalClick" @cancel="doPickPaperModalClick">
       <template #title>
         选择试卷
       </template>
@@ -136,10 +149,20 @@
         </a-form-item>
         <a-form-item></a-form-item>
       </a-form>
-      <a-table @select="(rowKeys, rowKey) => {console.log(rowKey)}" row-key="paperId" :row-selection="selectRow" :scroll="{y: 200}" :columns="paperColumns" :data="paperTableData">
+      <a-table @select="(rowKeys, rowKey) => {examForm.paperId = rowKey as number}" row-key="paperId"
+               :row-selection="selectRow" :scroll="{y: 200}" :columns="paperColumns" :data="paperTableData">
         <template #optional="{record}">
           <a-button @click="ev => {console.log(record)}" type="text">预览</a-button>
         </template>
+      </a-table>
+    </a-modal>
+
+    <a-modal width="800px" v-model:visible="pickClass" @ok="doPickClassModalClick" @cancel="doPickClassModalClick">
+      <template #title>
+        选择班级
+      </template>
+      <a-table row-key="classId" v-model:selectedKeys="examForm.classIdList" :row-selection="classSelectRow"
+               :scroll="{y: 200}" :columns="classColumns" :data="classTableData">
       </a-table>
     </a-modal>
   </div>
@@ -159,7 +182,7 @@ const userStore = userCurrentUserStore()
  * 创建考试表单
  */
 const examForm = ref({
-  classid: 0,
+  classIdList: [],
   examDurationTime: '',
   examEndTime: '',
   examName: '',
@@ -180,6 +203,8 @@ const paperTableQueryParams = ref({
  * 选择试卷表格数据
  */
 const paperTableData = ref([])
+
+const classTableData = ref([])
 
 /**
  * 选择试卷表格列
@@ -219,11 +244,6 @@ const paperColumns = [
   }
 ]
 
-/**
- * 选择班级列表
- */
-const classList = ref([])
-
 const pickClass = ref(false)
 
 const pickPaper = ref(false)
@@ -235,6 +255,28 @@ const subList: any = ref([])
 const selectRow = ref({
   type: 'radio'
 })
+
+const classSelectRow = ref({
+  type: 'check',
+  showCheckedAll: true,
+})
+
+const classColumns = [
+  {
+    title: '班级编号',
+    dataIndex: 'classId',
+    align: ['center'],
+    tooltip: true,
+    ellipsis: true,
+    width: 200
+  },
+  {
+    title: '班级名称',
+    dataIndex: 'className',
+    align: ['center'],
+    width: 100
+  }
+]
 
 //methods
 
@@ -250,12 +292,43 @@ const getPaperList = async () => {
   Message.error('试卷获取失败:' + res.message)
 }
 
-const handleOk = () => {
+/**
+ * 获取班级列表的方法
+ */
+const getClassList = async () => {
+  const res: any = await req.get('/cls/teacher/get/class/list')
+  if (res.code === 0) {
+    classTableData.value = res.data.filter((cls: any) => cls.subName == examForm.value.subName)
+    return
+  }
+  Message.error('班级获取失败:' + res.message)
+}
+
+/**
+ * 创建考试
+ * @param ref
+ */
+const handleOk = async (ref: any) => {
+  const loading = Message.loading('创建中')
+  const res: any = await req.post('/exam/teacher/create/exam/by-list', {
+    ...examForm.value
+  })
+  loading.close()
+  if (res.code === 0) {
+    Message.success('创建成功')
+    await loadData()
+    ref.resetFields()
+    visible.value = false
+    return
+  }
+  Message.error('创建失败:' + res.message)
+  ref.resetFields()
   visible.value = false
 }
 
 const handleCancel = (ref: any) => {
   ref.resetFields()
+  console.log(examForm.value)
   visible.value = false
 }
 
@@ -265,6 +338,7 @@ const doPickPaper = () => {
 }
 
 const doPickClass = () => {
+  getClassList()
   pickClass.value = true
 }
 
@@ -376,12 +450,12 @@ const doReset = (ref: any) => {
   loadData()
 }
 
-const pickPaperCancel = () => {
+const doPickPaperModalClick = () => {
   pickPaper.value = false
 }
 
-const pickPaperOk = () => {
-  pickPaper.value = false
+const doPickClassModalClick = () => {
+  pickClass.value = false
 }
 
 const getMyPaper = () => {
